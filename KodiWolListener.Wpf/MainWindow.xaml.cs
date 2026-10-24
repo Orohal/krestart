@@ -69,13 +69,16 @@ public partial class MainWindow : Window
         WriteLog("Bereit. Warte auf den Start des Listeners.");
     }
 
-    private void Window_Loaded(object sender, RoutedEventArgs e)
+        private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        if (Environment.GetCommandLineArgs().Any(
-                argument => string.Equals(argument, StartupRegistration.MinimizedArgument, StringComparison.OrdinalIgnoreCase)))
+        var args = Environment.GetCommandLineArgs();
+        if (args.Any(argument => string.Equals(argument, StartupRegistration.MinimizedArgument, StringComparison.OrdinalIgnoreCase)))
         {
             HideToTray();
         }
+
+        // Automatisch starten
+        StartListener();
     }
 
     private void Window_StateChanged(object? sender, EventArgs e)
@@ -198,7 +201,7 @@ public partial class MainWindow : Window
         });
     }
 
-    private async Task RestartKodiAsync(string kodiPath)
+        private async Task RestartKodiAsync(string kodiPath)
     {
         WriteLog("Magic Packet empfangen.");
         WriteLog("Kodi wird neu gestartet…");
@@ -209,20 +212,26 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    if (!process.HasExited)
+                    // Überprüfen, ob der Prozess tatsächlich aus unserem Kodi-Verzeichnis stammt
+                    var processPath = process.MainModule?.FileName;
+                    if (string.Equals(processPath, kodiPath, StringComparison.OrdinalIgnoreCase))
                     {
-                        process.CloseMainWindow();
-                        Task exitTask = process.WaitForExitAsync();
-                        if (await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(5))) != exitTask)
+                        if (!process.HasExited)
                         {
-                            process.Kill(entireProcessTree: true);
-                            await process.WaitForExitAsync();
+                            WriteLog($"Beende Kodi-Prozess (PID: {process.Id})...");
+                            process.CloseMainWindow();
+                            Task exitTask = process.WaitForExitAsync();
+                            if (await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(5))) != exitTask)
+                            {
+                                process.Kill(entireProcessTree: true);
+                                await process.WaitForExitAsync();
+                            }
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    WriteLog($"Kodi-Prozess konnte nicht beendet werden: {ex.Message}");
+                    WriteLog($"Kodi-Prozess (PID: {process.Id}) konnte nicht beendet werden: {ex.Message}");
                 }
             }
         }

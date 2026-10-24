@@ -8,30 +8,86 @@ namespace KodiWolListener;
 
 internal static class WolListener
 {
-    public static async Task ListenAsync(
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        public static async Task ListenAsync(
         int port,
         CancellationToken cancellationToken,
         Func<Task> onMagicPacket,
         Action<string> log,
         Action<bool> setActive)
     {
-        using var udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, port));
-        setActive(true);
-        log($"Listener aktiv auf UDP-Port {port}. Warte auf WoL-Signal…");
-
+        UdpClient? udpClient = null;
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                UdpReceiveResult result = await udpClient.ReceiveAsync(cancellationToken);
-                if (IsMagicPacket(result.Buffer))
-                    await onMagicPacket();
-            }
+            udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, port));
         }
-        finally
+        catch (SocketException ex)
         {
-            setActive(false);
-            log("Listener gestoppt.");
+            log($"Fehler beim Binden an Port {port}: {ex.Message}");
+            return;
+        }
+
+        using (udpClient)
+        {
+            setActive(true);
+            log($"Listener aktiv auf UDP-Port {port}. Warte auf WoL-Signal…");
+
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    // Create a task that completes when a packet is received
+                    var receiveTask = udpClient.ReceiveAsync();
+                    
+                    // Wait for either the packet or the cancellation token
+                    var completedTask = await Task.WhenAny(receiveTask, Task.Delay(-1, cancellationToken));
+
+                    if (completedTask == receiveTask)
+                    {
+                        UdpReceiveResult result = await receiveTask;
+                        if (IsMagicPacket(result.Buffer))
+                            await onMagicPacket();
+                    }
+                    else
+                    {
+                        // Cancellation requested
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                log($"Fehler beim Empfangen: {ex.Message}");
+            }
+            finally
+            {
+                setActive(false);
+                log("Listener gestoppt.");
+            }
         }
     }
 
