@@ -1,3 +1,10 @@
+## 📊 Clone Statistics
+
+See the [full clone statistics](CLONE_STATS.md).
+
+Clone traffic is updated daily by GitHub Actions.
+GitHub provides rolling 14-day traffic data, not lifetime unique cloners.
+
 # Kodi WoL Listener (Windows x64 Standalone)
 
 Ein leichtgewichtiger, im Hintergrund laufender UDP-Listener für Windows x64. Das Programm wartet auf ein standardisiertes **Wake-on-LAN (WoL) Magic Packet**, beendet eine eventuell hängende Kodi-Instanz und startet Kodi frisch neu. 
