@@ -1,0 +1,99 @@
+
+name: Track Clone Statistics
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  track-clones:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch and save clone history
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p stats
+
+          FILE="stats/clones.jsonl"
+          DATE=$(date -u +%F)
+
+          DATA=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/traffic/clones")
+
+          COUNT=$(jq -r '.count' <<< "$DATA")
+          UNIQUES=$(jq -r '.uniques' <<< "$DATA")
+
+          touch "$FILE"
+
+          # Store one snapshot per day; reruns update that day's entry.
+          jq -cn \
+            --arg date "$DATE" \
+            --argjson count "$COUNT" \
+            --argjson uniques "$UNIQUES" \
+            '{date:$date, clones_14d:$count, unique_cloners_14d:$uniques}' \
+            > /tmp/today.json
+
+          if grep -q "\"date\":\"$DATE\"" "$FILE"; then
+            jq -c --arg date "$DATE" \
+              'select(.date != $date)' "$FILE" \
+              > /tmp/history.jsonl
+            cat /tmp/history.jsonl /tmp/today.json > "$FILE"
+          else
+            cat /tmp/today.json >> "$FILE"
+          fi
+
+          MAX=$(jq -s '[.[].unique_cloners_14d] | max // 0' "$FILE")
+
+          {
+            echo "# Clone Statistics"
+            echo
+            echo "Last updated: $DATE (UTC)"
+            echo
+            echo "## Current GitHub traffic"
+            echo
+            echo "- Unique cloners (rolling 14 days): **$UNIQUES**"
+            echo "- Total clone operations (rolling 14 days): **$COUNT**"
+            echo
+            echo "## Tracking history"
+            echo
+            echo "- Tracking started: $(jq -r '.[0].date' < <(jq -s 'sort_by(.date)' "$FILE"))"
+            echo "- Highest observed daily 14-day unique-cloner count: **$MAX**"
+            echo
+            echo "> These are rolling-window metrics, not lifetime unique people."
+            echo "> GitHub does not expose cloner identities, so a lifetime unique-person count cannot be calculated."
+            echo
+            echo "## Daily snapshots"
+            echo
+            echo "| Date (UTC) | Unique cloners (14 days) | Clone operations (14 days) |"
+            echo "|---|---:|---:|"
+
+            jq -sr 'sort_by(.date)[] |
+              "| \(.date) | \(.unique_cloners_14d) | \(.clones_14d) |"' "$FILE"
+          } > CLONE_STATS.md
+
+      - name: Commit statistics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add CLONE_STATS.md stats/clones.jsonl
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Update clone statistics"
+            git push
+          fi
