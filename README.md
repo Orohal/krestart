@@ -54,8 +54,8 @@ KodiWolListener.exe --port 7 --path "D:\Media\Kodi\kodi.exe"
 ## 💡 Einrichtung als Windows-Autostart
 
 Damit die Kore-App Ihren Kodi-PC jederzeit reaktivieren kann, sollte der Listener unsichtbar im Hintergrund laufen.
-## 📊 Clone Statistics
-See the [full clone statistics](CLONE_STATS.md).
 1. Drücken Sie `Win + R`, geben Sie `shell:startup` ein und drücken Sie Enter.
 2. Erstellen Sie eine Verknüpfung der `KodiWolListener.exe` in diesem Ordner.
 3. *Optional:* Setzen Sie in den Eigenschaften der Verknüpfung das Ausführen-Fenster auf "Minimiert", damit beim Windows-Start kein Konsolenfenster stört.
+## 📊 Clone Statistics
+See the [full clone statistics](CLONE_STATS.md).
