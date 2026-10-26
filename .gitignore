@@ -1,0 +1,15 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# CMake (legacy build)
+build/
+CMakeFiles/
+CMakeCache.txt

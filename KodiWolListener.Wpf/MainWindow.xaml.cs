@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -101,12 +102,12 @@ public partial class MainWindow : Window
         await RequestExitAsync();
     }
 
-    private void ListenerButton_Click(object sender, RoutedEventArgs e)
+    private async void ListenerButton_Click(object sender, RoutedEventArgs e)
     {
         if (_listenerCancellation is null)
             StartListener();
         else
-            _ = StopListenerAsync();
+            await StopListenerAsync();
     }
 
     private void StartListener()
@@ -179,9 +180,26 @@ public partial class MainWindow : Window
 
         ListenerButton.IsEnabled = false;
         StatusText.Text = "Wird gestoppt";
-        cancellation.Cancel();
-        if (listenerTask is not null)
-            await listenerTask;
+        try
+        {
+            cancellation.Cancel();
+            if (listenerTask is not null)
+                await listenerTask;
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"Listener konnte nicht sauber gestoppt werden: {ex.Message}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_listenerCancellation, cancellation))
+            {
+                _listenerCancellation = null;
+                _listenerTask = null;
+                cancellation.Dispose();
+                SetListenerActive(false);
+            }
+        }
 
         if (_listenerCancellation is null)
             WriteLog("Listener gestoppt.");
@@ -201,54 +219,106 @@ public partial class MainWindow : Window
         });
     }
 
-        private async Task RestartKodiAsync(string kodiPath)
+    private async Task RestartKodiAsync(string kodiPath)
     {
         WriteLog("Magic Packet empfangen.");
         WriteLog("Kodi wird neu gestartet…");
 
-        foreach (Process process in Process.GetProcessesByName("kodi"))
+        string fullKodiPath;
+        try
+        {
+            fullKodiPath = Path.GetFullPath(kodiPath);
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"Kodi konnte nicht neu gestartet werden: ungültiger Pfad ({kodiPath}): {ex.Message}");
+            return;
+        }
+
+        Process[] kodiProcesses;
+        try
+        {
+            kodiProcesses = Process.GetProcessesByName("kodi");
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"Kodi-Prozesse konnten nicht ermittelt werden: {ex.Message}");
+            return;
+        }
+
+        bool inaccessibleInstance = false;
+        bool matchingProcessNotStopped = false;
+
+        foreach (Process process in kodiProcesses)
         {
             using (process)
             {
+                bool isMatchingProcess = false;
                 try
                 {
-                    // Überprüfen, ob der Prozess tatsächlich aus unserem Kodi-Verzeichnis stammt
-                    var processPath = process.MainModule?.FileName;
-                    if (string.Equals(processPath, kodiPath, StringComparison.OrdinalIgnoreCase))
+                    if (process.HasExited)
+                        continue;
+
+                    string? processPath = process.MainModule?.FileName;
+                    if (processPath is null)
+                        continue;
+
+                    // Only touch the Kodi instance that was configured in the UI.
+                    if (!PathsEqual(processPath, fullKodiPath))
                     {
-                        if (!process.HasExited)
-                        {
-                            WriteLog($"Beende Kodi-Prozess (PID: {process.Id})...");
-                            process.CloseMainWindow();
-                            Task exitTask = process.WaitForExitAsync();
-                            if (await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(5))) != exitTask)
-                            {
-                                process.Kill(entireProcessTree: true);
-                                await process.WaitForExitAsync();
-                            }
-                        }
+                        WriteLog($"Kodi-Prozess (PID: {process.Id}) stammt aus einem anderen Verzeichnis und bleibt unangetastet.");
+                        continue;
+                    }
+
+                    isMatchingProcess = true;
+                    WriteLog($"Beende Kodi-Prozess (PID: {process.Id})...");
+                    process.CloseMainWindow();
+                    Task exitTask = process.WaitForExitAsync();
+                    if (await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(5))) != exitTask)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync();
                     }
                 }
                 catch (Exception ex)
                 {
+                    // Reading MainModule fails with access denied when Kodi runs
+                    // elevated or under another user account.
+                    if (ex is UnauthorizedAccessException or Win32Exception { NativeErrorCode: 5 })
+                        inaccessibleInstance = true;
+                    else if (isMatchingProcess)
+                        matchingProcessNotStopped = true;
+
                     WriteLog($"Kodi-Prozess (PID: {process.Id}) konnte nicht beendet werden: {ex.Message}");
                 }
             }
         }
 
+        if (inaccessibleInstance)
+        {
+            WriteLog("Kodi wurde nicht gestartet, um keine zweite Instanz zu erzeugen. Bitte den Listener mit denselben Rechten wie Kodi (ggf. als Administrator) ausführen.");
+            return;
+        }
+
+        if (matchingProcessNotStopped)
+        {
+            WriteLog("Kodi wurde nicht gestartet, weil der laufende Kodi-Prozess nicht beendet werden konnte.");
+            return;
+        }
+
         await Task.Delay(TimeSpan.FromSeconds(1));
         try
         {
-            if (!File.Exists(kodiPath))
+            if (!File.Exists(fullKodiPath))
             {
-                WriteLog($"Kodi konnte nicht gestartet werden: Datei nicht gefunden ({kodiPath}).");
+                WriteLog($"Kodi konnte nicht gestartet werden: Datei nicht gefunden ({fullKodiPath}).");
                 return;
             }
 
             Process? startedProcess = Process.Start(new ProcessStartInfo
             {
-                FileName = kodiPath,
-                WorkingDirectory = Path.GetDirectoryName(kodiPath)!,
+                FileName = fullKodiPath,
+                WorkingDirectory = Path.GetDirectoryName(fullKodiPath)!,
                 UseShellExecute = true
             });
 
@@ -263,6 +333,21 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             WriteLog($"Kodi konnte nicht gestartet werden: {ex.Message}");
+        }
+    }
+
+    private static bool PathsEqual(string first, string second)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(first),
+                Path.GetFullPath(second),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
@@ -340,11 +425,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private void WriteLog(string message)
+        private void WriteLog(string message)
     {
+        // Sicherstellen, dass wir immer im UI-Thread sind
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.Invoke(() => WriteLog(message));
+            Dispatcher.BeginInvoke(new Action(() => WriteLog(message)));
             return;
         }
 
@@ -376,8 +462,18 @@ public partial class MainWindow : Window
             return;
 
         _isClosing = true;
-        await StopListenerAsync();
-        _allowClose = true;
-        Close();
+        try
+        {
+            await StopListenerAsync();
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"Fehler beim Beenden: {ex.Message}");
+        }
+        finally
+        {
+            _allowClose = true;
+            Close();
+        }
     }
 }

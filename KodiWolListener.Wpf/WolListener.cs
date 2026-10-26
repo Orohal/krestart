@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -8,32 +9,13 @@ namespace KodiWolListener;
 
 internal static class WolListener
 {
+    // Senders such as Kore may emit the magic packet several times, and packets
+    // that arrive while Kodi restarts stay queued in the socket. Ignore further
+    // magic packets for this period after a restart so Kodi is not killed again
+    // right after it was started.
+    private static readonly TimeSpan RestartCooldown = TimeSpan.FromSeconds(10);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        public static async Task ListenAsync(
+    public static async Task ListenAsync(
         int port,
         CancellationToken cancellationToken,
         Func<Task> onMagicPacket,
@@ -56,30 +38,42 @@ internal static class WolListener
             setActive(true);
             log($"Listener aktiv auf UDP-Port {port}. Warte auf WoL-Signal…");
 
+            long lastRestartTimestamp = 0;
             try
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    // Create a task that completes when a packet is received
-                    var receiveTask = udpClient.ReceiveAsync();
-                    
-                    // Wait for either the packet or the cancellation token
-                    var completedTask = await Task.WhenAny(receiveTask, Task.Delay(-1, cancellationToken));
+                    UdpReceiveResult result = await udpClient.ReceiveAsync(cancellationToken);
+                    if (!IsMagicPacket(result.Buffer))
+                        continue;
 
-                    if (completedTask == receiveTask)
+                    if (lastRestartTimestamp != 0 &&
+                        Stopwatch.GetElapsedTime(lastRestartTimestamp) < RestartCooldown)
                     {
-                        UdpReceiveResult result = await receiveTask;
-                        if (IsMagicPacket(result.Buffer))
-                            await onMagicPacket();
+                        log("Weiteres Magic Packet ignoriert (Neustart gerade ausgelöst).");
+                        continue;
                     }
-                    else
+
+                    try
                     {
-                        // Cancellation requested
-                        break;
+                        await onMagicPacket();
+                    }
+                    catch (Exception ex)
+                    {
+                        // A failed restart must not stop the listener.
+                        log($"Kodi-Neustart fehlgeschlagen: {ex.Message}");
+                    }
+                    finally
+                    {
+                        lastRestartTimestamp = Stopwatch.GetTimestamp();
                     }
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Normal shutdown via the stop button or window close.
+            }
+            catch (Exception ex)
             {
                 log($"Fehler beim Empfangen: {ex.Message}");
             }
