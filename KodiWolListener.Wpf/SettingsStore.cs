@@ -7,10 +7,15 @@ namespace KodiWolListener;
 internal sealed class SettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-    private readonly string _settingsPath = Path.Combine(
+    private readonly string _settingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "KodiWolListener",
-        "settings.json");
+        "KodiWolListener");
+    private readonly string _settingsPath;
+
+    public SettingsStore()
+    {
+        _settingsPath = Path.Combine(_settingsDirectory, "settings.json");
+    }
 
     public AppSettings Load(out string? warning)
     {
@@ -46,7 +51,12 @@ internal sealed class SettingsStore
 
     public void Save(AppSettings settings)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-        File.WriteAllText(_settingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        Directory.CreateDirectory(_settingsDirectory);
+
+        // Write to a temporary file first so an interrupted save cannot leave a
+        // truncated settings file behind.
+        string temporaryPath = _settingsPath + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, JsonOptions));
+        File.Move(temporaryPath, _settingsPath, overwrite: true);
     }
 }

@@ -57,6 +57,28 @@ Zum Entfernen des Autostarts genügt es, die Option wieder zu deaktivieren. Wird
 
 ---
 
+## 🧪 Tests
+
+Im Ordner `tests\` liegen Funktionstests für beide Varianten. Sie verwenden
+einen mitgelieferten Fake-Kodi und starten oder beenden niemals eine echte
+Kodi-Installation. Details siehe [tests/README.md](tests/README.md).
+
+```powershell
+dotnet build KodiWolListener.Wpf\KodiWolListener.Wpf.csproj -c Release
+pwsh -NoProfile -File tests\Run-All.ps1
+```
+
+Optional lässt sich die C++-Variante mitprüfen, sofern sie zuvor per CMake
+gebaut wurde:
+
+```powershell
+cmake -S . -B build\mingw -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build\mingw
+pwsh -NoProfile -File tests\Run-All.ps1
+```
+
+---
+
 ## ⚠️ Hinweise
 
 * **Windows-Firewall**: Erlauben Sie eingehende UDP-Verbindungen auf dem gewählten Port (`7` oder `9`) für `KodiWolListener.exe`. Ohne Freigabe erreichen die Magic Packets den Listener nicht.

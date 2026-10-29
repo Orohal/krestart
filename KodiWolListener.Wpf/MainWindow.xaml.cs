@@ -2,7 +2,6 @@ using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -51,7 +50,8 @@ public partial class MainWindow : Window
             : _settings.KodiPath;
         PortComboBox.SelectedItem = PortComboBox.Items
             .Cast<ComboBoxItem>()
-            .First(item => item.Content?.ToString() == _settings.Port.ToString());
+            .FirstOrDefault(item => string.Equals(item.Content?.ToString(), _settings.Port.ToString(), StringComparison.Ordinal))
+            ?? PortComboBox.Items[0];
         StartupCheckBox.IsChecked = _settings.StartAtWindowsStartup;
         _initializing = false;
 
@@ -70,7 +70,7 @@ public partial class MainWindow : Window
         WriteLog("Bereit. Warte auf den Start des Listeners.");
     }
 
-        private void Window_Loaded(object sender, RoutedEventArgs e)
+    private void Window_Loaded(object sender, RoutedEventArgs e)
     {
         var args = Environment.GetCommandLineArgs();
         if (args.Any(argument => string.Equals(argument, StartupRegistration.MinimizedArgument, StringComparison.OrdinalIgnoreCase)))
@@ -88,7 +88,7 @@ public partial class MainWindow : Window
             HideToTray();
     }
 
-    private async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void Window_Closing(object? sender, CancelEventArgs e)
     {
         if (_allowClose)
         {
@@ -99,7 +99,11 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        await RequestExitAsync();
+
+        // Close() darf nicht ausgeführt werden, solange das Closing-Ereignis
+        // noch läuft (sonst InvalidOperationException). Deshalb den Shutdown
+        // erst nach Abschluss dieses Ereignisses einplanen.
+        Dispatcher.BeginInvoke(new Action(() => _ = RequestExitAsync()));
     }
 
     private async void ListenerButton_Click(object sender, RoutedEventArgs e)
@@ -128,27 +132,31 @@ public partial class MainWindow : Window
         }
 
         SaveSettings();
+        var controller = new KodiController(kodiPath, WriteLog);
         var cancellation = new CancellationTokenSource();
         _listenerCancellation = cancellation;
         ListenerButton.Content = "Listener stoppen";
-        ListenerButton.IsEnabled = true;
+        ListenerButton.IsEnabled = false;
         KodiPathTextBox.IsEnabled = false;
         BrowseButton.IsEnabled = false;
         PortComboBox.IsEnabled = false;
         StatusText.Text = "Wird gestartet";
         StatusIndicator.Fill = Brushes.DarkOrange;
         WriteLog($"Starte Listener auf UDP-Port {port}…");
-        _listenerTask = ListenAsync(port, kodiPath, cancellation);
+
+        Task listenerTask = ListenAsync(port, controller, cancellation);
+        if (!listenerTask.IsCompleted)
+            _listenerTask = listenerTask;
     }
 
-    private async Task ListenAsync(int port, string kodiPath, CancellationTokenSource cancellation)
+    private async Task ListenAsync(int port, KodiController controller, CancellationTokenSource cancellation)
     {
         try
         {
             await WolListener.ListenAsync(
                 port,
                 cancellation.Token,
-                () => RestartKodiAsync(kodiPath),
+                controller.RestartAsync,
                 WriteLog,
                 SetListenerActive);
         }
@@ -200,155 +208,23 @@ public partial class MainWindow : Window
                 SetListenerActive(false);
             }
         }
-
-        if (_listenerCancellation is null)
-            WriteLog("Listener gestoppt.");
     }
 
     private void SetListenerActive(bool active)
     {
-        Dispatcher.Invoke(() =>
+        if (!Dispatcher.CheckAccess())
         {
-            StatusText.Text = active ? "Aktiv" : "Inaktiv";
-            StatusIndicator.Fill = active ? Brushes.ForestGreen : Brushes.Gray;
-            ListenerButton.Content = active ? "Listener stoppen" : "Listener starten";
-            ListenerButton.IsEnabled = true;
-            KodiPathTextBox.IsEnabled = !active;
-            BrowseButton.IsEnabled = !active;
-            PortComboBox.IsEnabled = !active;
-        });
-    }
-
-    private async Task RestartKodiAsync(string kodiPath)
-    {
-        WriteLog("Magic Packet empfangen.");
-        WriteLog("Kodi wird neu gestartet…");
-
-        string fullKodiPath;
-        try
-        {
-            fullKodiPath = Path.GetFullPath(kodiPath);
-        }
-        catch (Exception ex)
-        {
-            WriteLog($"Kodi konnte nicht neu gestartet werden: ungültiger Pfad ({kodiPath}): {ex.Message}");
+            Dispatcher.BeginInvoke(new Action(() => SetListenerActive(active)));
             return;
         }
 
-        Process[] kodiProcesses;
-        try
-        {
-            kodiProcesses = Process.GetProcessesByName("kodi");
-        }
-        catch (Exception ex)
-        {
-            WriteLog($"Kodi-Prozesse konnten nicht ermittelt werden: {ex.Message}");
-            return;
-        }
-
-        bool inaccessibleInstance = false;
-        bool matchingProcessNotStopped = false;
-
-        foreach (Process process in kodiProcesses)
-        {
-            using (process)
-            {
-                bool isMatchingProcess = false;
-                try
-                {
-                    if (process.HasExited)
-                        continue;
-
-                    string? processPath = process.MainModule?.FileName;
-                    if (processPath is null)
-                        continue;
-
-                    // Only touch the Kodi instance that was configured in the UI.
-                    if (!PathsEqual(processPath, fullKodiPath))
-                    {
-                        WriteLog($"Kodi-Prozess (PID: {process.Id}) stammt aus einem anderen Verzeichnis und bleibt unangetastet.");
-                        continue;
-                    }
-
-                    isMatchingProcess = true;
-                    WriteLog($"Beende Kodi-Prozess (PID: {process.Id})...");
-                    process.CloseMainWindow();
-                    Task exitTask = process.WaitForExitAsync();
-                    if (await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(5))) != exitTask)
-                    {
-                        process.Kill(entireProcessTree: true);
-                        await process.WaitForExitAsync();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Reading MainModule fails with access denied when Kodi runs
-                    // elevated or under another user account.
-                    if (ex is UnauthorizedAccessException or Win32Exception { NativeErrorCode: 5 })
-                        inaccessibleInstance = true;
-                    else if (isMatchingProcess)
-                        matchingProcessNotStopped = true;
-
-                    WriteLog($"Kodi-Prozess (PID: {process.Id}) konnte nicht beendet werden: {ex.Message}");
-                }
-            }
-        }
-
-        if (inaccessibleInstance)
-        {
-            WriteLog("Kodi wurde nicht gestartet, um keine zweite Instanz zu erzeugen. Bitte den Listener mit denselben Rechten wie Kodi (ggf. als Administrator) ausführen.");
-            return;
-        }
-
-        if (matchingProcessNotStopped)
-        {
-            WriteLog("Kodi wurde nicht gestartet, weil der laufende Kodi-Prozess nicht beendet werden konnte.");
-            return;
-        }
-
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        try
-        {
-            if (!File.Exists(fullKodiPath))
-            {
-                WriteLog($"Kodi konnte nicht gestartet werden: Datei nicht gefunden ({fullKodiPath}).");
-                return;
-            }
-
-            Process? startedProcess = Process.Start(new ProcessStartInfo
-            {
-                FileName = fullKodiPath,
-                WorkingDirectory = Path.GetDirectoryName(fullKodiPath)!,
-                UseShellExecute = true
-            });
-
-            if (startedProcess is null)
-                WriteLog("Kodi konnte nicht gestartet werden: Windows hat keinen Prozess erzeugt.");
-            else
-            {
-                startedProcess.Dispose();
-                WriteLog("Kodi wurde gestartet.");
-            }
-        }
-        catch (Exception ex)
-        {
-            WriteLog($"Kodi konnte nicht gestartet werden: {ex.Message}");
-        }
-    }
-
-    private static bool PathsEqual(string first, string second)
-    {
-        try
-        {
-            return string.Equals(
-                Path.GetFullPath(first),
-                Path.GetFullPath(second),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+        StatusText.Text = active ? "Aktiv" : "Inaktiv";
+        StatusIndicator.Fill = active ? Brushes.ForestGreen : Brushes.Gray;
+        ListenerButton.Content = active ? "Listener stoppen" : "Listener starten";
+        ListenerButton.IsEnabled = true;
+        KodiPathTextBox.IsEnabled = !active;
+        BrowseButton.IsEnabled = !active;
+        PortComboBox.IsEnabled = !active;
     }
 
     private void BrowseButton_Click(object sender, RoutedEventArgs e)
@@ -425,7 +301,9 @@ public partial class MainWindow : Window
         }
     }
 
-        private void WriteLog(string message)
+    private const int MaxLogLines = 500;
+
+    private void WriteLog(string message)
     {
         // Sicherstellen, dass wir immer im UI-Thread sind
         if (!Dispatcher.CheckAccess())
@@ -434,11 +312,29 @@ public partial class MainWindow : Window
             return;
         }
 
-        _logLines.Enqueue($"{DateTime.Now:HH:mm:ss}  {message}");
-        while (_logLines.Count > 500)
-            _logLines.Dequeue();
+        string line = $"{DateTime.Now:HH:mm:ss}  {message}";
+        _logLines.Enqueue(line);
 
-        LogTextBox.Text = string.Join(Environment.NewLine, _logLines);
+        bool trimmed = false;
+        while (_logLines.Count > MaxLogLines)
+        {
+            _logLines.Dequeue();
+            trimmed = true;
+        }
+
+        // A full rebuild is only needed when the oldest line was dropped;
+        // otherwise appending is enough and keeps the update cheap.
+        if (trimmed)
+        {
+            LogTextBox.Text = string.Join(Environment.NewLine, _logLines);
+        }
+        else
+        {
+            if (LogTextBox.Text.Length > 0)
+                LogTextBox.AppendText(Environment.NewLine);
+            LogTextBox.AppendText(line);
+        }
+
         LogTextBox.ScrollToEnd();
     }
 
