@@ -3,6 +3,7 @@
 Ein leichtgewichtiger, im Hintergrund laufender UDP-Listener für Windows x64. Das Programm wartet auf ein standardisiertes **Wake-on-LAN (WoL) Magic Packet**, beendet eine eventuell hängende Kodi-Instanz und startet Kodi frisch neu. 
 
 Da die Anwendung als **Self-Contained (eigenständig)** kompiliert wird, ist **keine separate Installation von .NET oder einer Laufzeitumgebung auf dem Ziel-PC erforderlich**.
+---
 <br>
 <a href="https://www.buymeacoffee.com/Orohal" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 ---
