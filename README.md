@@ -6,7 +6,7 @@ Da die Anwendung als **Self-Contained (eigenständig)** kompiliert wird, ist **k
 ---
 <br>
 <a href="https://www.buymeacoffee.com/Orohal" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
----
+
 
 ## 📱 Steuerung über die Kore Android-App
 
