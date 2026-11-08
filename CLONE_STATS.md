@@ -1,16 +1,16 @@
 # Clone Statistics
 
-Last updated: 2026-11-07 (UTC)
+Last updated: 2026-11-08 (UTC)
 
 ## Current GitHub traffic
 
-- Unique cloners (rolling 14 days): **94**
-- Total clone operations (rolling 14 days): **209**
+- Unique cloners (rolling 14 days): **103**
+- Total clone operations (rolling 14 days): **232**
 
 ## Tracking history
 
 - Tracking started: 2026-10-25
-- Highest observed daily 14-day unique-cloner count: **96**
+- Highest observed daily 14-day unique-cloner count: **103**
 
 > These are rolling-window metrics, not lifetime unique people.
 > GitHub does not expose cloner identities, so a lifetime unique-person count cannot be calculated.
@@ -33,3 +33,4 @@ Last updated: 2026-11-07 (UTC)
 | 2026-11-05 | 94 | 203 |
 | 2026-11-06 | 94 | 203 |
 | 2026-11-07 | 94 | 209 |
+| 2026-11-08 | 103 | 232 |
