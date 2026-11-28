@@ -1,11 +1,11 @@
 # Clone Statistics
 
-Last updated: 2026-11-27 (UTC)
+Last updated: 2026-11-28 (UTC)
 
 ## Current GitHub traffic
 
-- Unique cloners (rolling 14 days): **79**
-- Total clone operations (rolling 14 days): **147**
+- Unique cloners (rolling 14 days): **78**
+- Total clone operations (rolling 14 days): **148**
 
 ## Tracking history
 
@@ -53,3 +53,4 @@ Last updated: 2026-11-27 (UTC)
 | 2026-11-25 | 84 | 159 |
 | 2026-11-26 | 81 | 151 |
 | 2026-11-27 | 79 | 147 |
+| 2026-11-28 | 78 | 148 |
